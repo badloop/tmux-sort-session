@@ -94,6 +94,7 @@ bind-key l choose-tree -Zs -O name \
 | `@session_order_sep`              | `\|`     | Token/name separator. Must not appear in your session names.    |
 | `@session_order_step`             | `10`     | Gap between tokens on normalize (room to insert between slots).  |
 | `@session_order_pad`              | `3`      | Zero-pad width for tokens. `3` supports up to 999 slots.        |
+| `@session_order_ignore`           | *(empty)*| Extended-regex of **base** names to never tokenize or move.     |
 
 Example:
 
@@ -102,6 +103,30 @@ set -g @session_order_key_up        'S-Up'
 set -g @session_order_key_down      'S-Down'
 set -g @session_order_key_normalize 'S-Left'
 ```
+
+### Pinning sessions (`@session_order_ignore`)
+
+**Important:** the order token becomes part of the real session name, so a
+session named `work` becomes `010|work`. Anything that targets a session by its
+**exact name** — most commonly `tmux has-session -t "NAME"` in a startup/daemon
+script — will no longer match a tokenized session and may, e.g., spawn a
+duplicate.
+
+To protect such sessions, list them (as an extended regex matched against the
+full base name) in `@session_order_ignore`. Ignored sessions are never
+tokenized, never renamed, and cannot be moved; reorder operations simply skip
+over them.
+
+```tmux
+# Never touch these infrastructure sessions (managed by external scripts that
+# do `tmux has-session -t "M365 SENTINEL"` etc.).
+set -g @session_order_ignore 'M365 SENTINEL|TELEGRAM BOT'
+```
+
+The value is a POSIX extended regex anchored to the whole name (the plugin wraps
+it as `^(...)$`), so `M365 SENTINEL|TELEGRAM BOT` matches exactly those two
+names, while something like `infra-.*` would match any `infra-` prefixed
+session.
 
 ## How it behaves
 
@@ -131,10 +156,10 @@ scripts/session-order.sh normalize # re-number all tokens
 ## Caveats
 
 - The order token becomes part of the real session name. Anything that targets
-  sessions **by exact name** (scripts, `tmux switch -t work`) must account for
-  the token, or target by the stripped base name as this plugin does internally.
-  If you script against session names, prefer `normalize`-free matching on the
-  base, or call sessions by a stable attribute.
+  sessions **by exact name** (scripts, `tmux switch -t work`, and especially
+  `tmux has-session -t "NAME"` in daemons) must account for the token — or,
+  better, add those sessions to `@session_order_ignore` so they are never
+  tokenized. See **Pinning sessions** above.
 - Don't use your `@session_order_sep` character inside session names.
 
 ## License

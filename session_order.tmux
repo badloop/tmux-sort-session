@@ -26,9 +26,12 @@ KEY_NORMALIZE="$(get_opt "@session_order_key_normalize" "")" # unset by default
 SEP="$(get_opt  "@session_order_sep"  "|")"
 STEP="$(get_opt "@session_order_step" "10")"
 PAD="$(get_opt  "@session_order_pad"  "3")"
+IGNORE="$(get_opt "@session_order_ignore" "")"  # ERE of base names to never touch
 
 # Export config so the script picks it up regardless of how it's invoked.
-ENV_PREFIX="SESSION_ORDER_SEP='${SEP}' SESSION_ORDER_STEP='${STEP}' SESSION_ORDER_PAD='${PAD}'"
+# Values are single-quoted; an IGNORE regex with spaces/pipes is safe as long as
+# it contains no single quotes (which are invalid in tmux session names anyway).
+ENV_PREFIX="SESSION_ORDER_SEP='${SEP}' SESSION_ORDER_STEP='${STEP}' SESSION_ORDER_PAD='${PAD}' SESSION_ORDER_IGNORE='${IGNORE}'"
 
 # --- Key bindings -----------------------------------------------------------
 # Prefix-table bindings (outside choose-tree): move the ATTACHED session.

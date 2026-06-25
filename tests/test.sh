@@ -87,6 +87,55 @@ check "round trip restores" "010|music
 040|work
 050|newbie" "$(raw)"
 
+# ---------------------------------------------------------------------------
+# Ignore-list (pinned sessions): infra sessions targeted by has-session -t
+# "<name>" must NEVER be tokenized, and moves must skip over them.
+# Use a SEPARATE socket to avoid kill/recreate races on the primary socket.
+# ---------------------------------------------------------------------------
+SOCKET2="sesh-order-test2-$$"
+TX2="tmux -L ${SOCKET2}"
+cleanup2() { $TX2 kill-server 2>/dev/null; }
+trap 'cleanup; cleanup2' EXIT
+
+IG='AGENT ONE|AGENT TWO'
+run_ig() { SESSION_ORDER_TMUX="$TX2" SESSION_ORDER_SEP='|' SESSION_ORDER_STEP='10' SESSION_ORDER_PAD='3' SESSION_ORDER_IGNORE="$IG" "$SCRIPT" "$@"; }
+raw2() { $TX2 list-sessions -F '#{session_name}' | LC_ALL=C sort; }
+
+$TX2 kill-server 2>/dev/null
+$TX2 new-session -d -s "AGENT ONE"
+$TX2 new-session -d -s "AGENT TWO"
+$TX2 new-session -d -s "alpha"
+$TX2 new-session -d -s "beta"
+$TX2 new-session -d -s "gamma"
+
+echo "== Test 8: normalize tokenizes only NON-ignored sessions =="
+run_ig normalize
+check "pinned untouched, others tokenized" "010|alpha
+020|beta
+030|gamma
+AGENT ONE
+AGENT TWO" "$(raw2)"
+
+echo "== Test 9: pinned session still findable by exact name (has-session) =="
+if $TX2 has-session -t "AGENT ONE" 2>/dev/null; then
+  check "has-session 'AGENT ONE' works" "ok" "ok"
+else
+  check "has-session 'AGENT ONE' works" "ok" "FAILED"
+fi
+
+echo "== Test 10: moving a pinned session is refused (no rename) =="
+before="$(raw2)"
+run_ig up "AGENT ONE"
+check "pinned move is a no-op" "$before" "$(raw2)"
+
+echo "== Test 11: moves operate only among orderable sessions =="
+run_ig up gamma   # gamma 030 <-> beta 020
+check "gamma rose above beta; pinned untouched" "010|alpha
+020|gamma
+030|beta
+AGENT ONE
+AGENT TWO" "$(raw2)"
+
 echo ""
 echo "RESULT: $pass passed, $fail failed"
 [[ $fail -eq 0 ]]

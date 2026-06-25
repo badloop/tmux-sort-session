@@ -31,6 +31,12 @@ SEP="${SESSION_ORDER_SEP:-|}"      # token/name separator. Must not appear in na
 STEP="${SESSION_ORDER_STEP:-10}"   # gap between tokens on normalize (room to insert).
 PAD="${SESSION_ORDER_PAD:-3}"      # zero-pad width. 3 => supports up to 999 slots.
 
+# Extended-regex of session BASE names to never tokenize/reorder. Pinned
+# infrastructure sessions (e.g. agents targeted by `has-session -t "<name>"`)
+# must keep their exact name. Matched against the token-stripped base name with
+# anchored full-string semantics (we wrap as ^(...)$). Empty = ignore nothing.
+IGNORE="${SESSION_ORDER_IGNORE:-}"
+
 # tmux binary indirection. Tests set SESSION_ORDER_TMUX="tmux -L <socket>" so the
 # script can never touch the user's default server by accident. In normal use
 # this is just "tmux" and run-shell already runs us in the right server context.
@@ -39,6 +45,14 @@ tx() { ${TMUX_CMD} "$@"; }
 
 # A session name "matches" our scheme when it starts with <PAD digits><SEP>.
 token_re="^[0-9]{${PAD}}\\${SEP}"
+
+# True if a session (given its full name) is pinned/ignored and must be left
+# completely untouched.
+is_ignored() {
+  local base
+  base="$(name_base "$1")"
+  [[ -n $IGNORE ]] && [[ $base =~ ^(${IGNORE})$ ]]
+}
 
 # ----------------------------------------------------------------------------
 # Helpers
@@ -101,12 +115,22 @@ swap_tokens() {
   tx rename-session -t "$tmp" "${b_tok}${SEP}${a_base}" || return 1
 }
 
-# Ensure every session has a token. Untokenized sessions are appended after the
-# current max token, preserving their existing sorted position relative to each
-# other. Idempotent; safe to call before every move.
+# Emit non-ignored session names in current sorted order. Ignored (pinned)
+# sessions are excluded entirely so the reordering logic never sees or touches
+# them. This is what every operation below iterates over.
+list_orderable() {
+  local n
+  while IFS= read -r n; do
+    is_ignored "$n" || printf '%s\n' "$n"
+  done < <(list_sorted)
+}
+
+# Ensure every orderable session has a token. Untokenized sessions are appended
+# after the current max token, preserving their existing sorted position
+# relative to each other. Idempotent; safe to call before every move.
 ensure_tokens() {
   local names=() n
-  while IFS= read -r n; do names+=("$n"); done < <(list_sorted)
+  while IFS= read -r n; do names+=("$n"); done < <(list_orderable)
   (( ${#names[@]} == 0 )) && return 0
 
   # Current max token value (base-10; leading zeros are not octal).
@@ -129,11 +153,11 @@ ensure_tokens() {
   return 0
 }
 
-# Reassign clean, evenly-spaced tokens to all sessions in current sorted order.
+# Reassign clean, evenly-spaced tokens to all orderable sessions in sorted order.
 normalize() {
   ensure_tokens
   local names=() n
-  while IFS= read -r n; do names+=("$n"); done < <(list_sorted)
+  while IFS= read -r n; do names+=("$n"); done < <(list_orderable)
   (( ${#names[@]} == 0 )) && return 0
 
   local i=1 val base want
@@ -153,13 +177,19 @@ normalize() {
 move() {
   local dir="$1" target_raw="$2"
 
-  ensure_tokens
-
   local target_base
   target_base="$(name_base "$target_raw")"
 
+  # Refuse to move a pinned session.
+  if is_ignored "$target_raw"; then
+    tx display-message "session-order: '${target_base}' is pinned (ignored); not moving"
+    return 0
+  fi
+
+  ensure_tokens
+
   local names=() n
-  while IFS= read -r n; do names+=("$n"); done < <(list_sorted)
+  while IFS= read -r n; do names+=("$n"); done < <(list_orderable)
   (( ${#names[@]} == 0 )) && return 0
 
   # Locate target by base name (its token may have just been assigned).
